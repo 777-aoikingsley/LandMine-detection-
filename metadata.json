@@ -1,0 +1,6 @@
+{
+  "name": "Mine Detection Dashboard",
+  "description": "A real-time interface for Arduino-based landmine detection systems using Web Serial API.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
