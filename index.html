@@ -390,6 +390,12 @@
         }
 
         async function connect() {
+            if (!navigator.serial) {
+                addLog("CRITICAL: Web Serial API not found or restricted.");
+                alert("Web Serial API is not supported in this context. Please make sure you are using Google Chrome and have OPENED THIS APP IN A NEW TAB.");
+                return;
+            }
+
             try {
                 port = await navigator.serial.requestPort();
                 await port.open({ baudRate: 9600 });
@@ -416,26 +422,45 @@
                 if (done) break;
                 if (value) {
                     buffer += value;
-                    let parts = buffer.split('\n');
-                    buffer = parts.pop();
                     
-                    parts.forEach(line => {
-                        processLine(line.trim());
-                    });
+                    // Robust extraction logic
+                    while (true) {
+                        const startTag = "[UI_DATA:";
+                        const startIndex = buffer.indexOf(startTag);
+                        
+                        if (startIndex === -1) {
+                            // If no start tag found, keep only the potential trailing partial tag
+                            // to prevent buffer bloating
+                            if (buffer.length > 50) {
+                                buffer = buffer.slice(-startTag.length);
+                            }
+                            break;
+                        }
+
+                        const endIndex = buffer.indexOf("]", startIndex);
+                        if (endIndex === -1) {
+                            // Start found but message is incomplete, wait for more data
+                            buffer = buffer.slice(startIndex);
+                            break;
+                        }
+
+                        // We have a full packet
+                        const fullMessage = buffer.slice(startIndex, endIndex + 1);
+                        processMessage(fullMessage);
+
+                        // Move buffer pointer forward
+                        buffer = buffer.slice(endIndex + 1);
+                    }
                 }
             }
         }
 
-        function processLine(line) {
-            if (line.includes("[UI_DATA:")) {
-                const match = line.match(/\[UI_DATA:(\d+),(\d+)\]/);
-                if (match) {
-                    const ir = parseInt(match[1]);
-                    const metal = parseInt(match[2]);
-                    updateUI(ir, metal);
-                }
-            } else if (line.length > 0) {
-                addLog(line);
+        function processMessage(msg) {
+            const match = msg.match(/\[UI_DATA:(\d+),(\d+)\]/);
+            if (match) {
+                const ir = parseInt(match[1]);
+                const metal = parseInt(match[2]);
+                updateUI(ir, metal);
             }
         }
 
