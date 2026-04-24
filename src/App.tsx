@@ -274,36 +274,63 @@ export default function App() {
       </main>
 
       {/* ALERT MODAL */}
+<style>{`
+  @keyframes flicker {
+    0%, 19.999%, 22%, 62.999%, 64%, 64.999%, 70%, 100% {
+      opacity: 1;
+    }
+    20%, 21.999%, 63%, 63.999%, 65%, 69.999% {
+      opacity: 0.4;
+    }
+  }
+  .animate-flicker {
+    animation: flicker 2s infinite;
+  }
+`}</style>
       <AnimatePresence>
         {isAlertOpen && (
           <div className="fixed inset-0 z-[5000] flex items-center justify-center p-6">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/95 backdrop-blur-2xl" />
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }} 
+              className="absolute inset-0 bg-red-950/90 backdrop-blur-3xl" 
+            />
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="relative w-full max-w-xl bg-black border-2 border-red-500 p-12 text-center shadow-[0_0_80px_rgba(255,0,0,0.4)]"
+              initial={{ scale: 0.9, opacity: 0, rotateX: 20 }}
+              animate={{ scale: 1, opacity: 1, rotateX: 0 }}
+              exit={{ scale: 0.9, opacity: 0, rotateX: 20 }}
+              className="relative w-full max-w-xl bg-black border-4 border-red-600 p-12 text-center shadow-[0_0_100px_rgba(255,0,0,0.6),inset_0_0_40px_rgba(255,0,0,0.2)] overflow-hidden"
+              style={{ perspective: '1000px' }}
             >
-              <div className="w-24 h-24 border-2 border-red-500 rounded-full mx-auto mb-10 flex items-center justify-center rotate-45">
+              {/* Retro Cyber Decor */}
+              <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-red-500" />
+              <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-red-500" />
+              <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-red-500" />
+              <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-red-500" />
+              <div className="absolute top-0 left-1/2 -translate-x-1/2 px-4 py-1 bg-red-600 text-[8px] font-bold text-black uppercase tracking-[0.5em]">System Failure</div>
+
+              <div className="w-24 h-24 border-2 border-red-500 rounded-full mx-auto mb-10 flex items-center justify-center rotate-45 relative">
+                 <div className="absolute inset-0 border-2 border-red-500/30 rounded-full animate-ping" />
                  <AlertTriangle className="w-12 h-12 text-red-500 -rotate-45 animate-pulse" />
               </div>
-              <h3 className="text-5xl font-black text-red-500 uppercase tracking-tighter mb-4 italic">Hazard Identified</h3>
+              <h3 className="text-5xl font-black text-red-500 uppercase tracking-tighter mb-4 italic animate-flicker">MINE DETECTED</h3>
               <p className="text-slate-400 text-xs mb-12 font-mono uppercase tracking-[0.3em] leading-loose">
-                MINE SIGNATURE CONFIRMED. STOP ALL MOVEMENT IMMEDIATELY.
+                ORDNANCE SIGNATURE CONFIRMED. STOP ALL MOVEMENT IMMEDIATELY.
               </p>
               
               <div className="flex gap-6">
                 <button 
                   onClick={() => setIsAlertOpen(false)} 
-                  className="flex-1 py-4 bg-red-600 hover:bg-red-500 text-white font-black text-xs uppercase tracking-widest transition-all"
+                  className="flex-1 py-4 bg-red-600 hover:bg-red-500 text-white font-black text-xs uppercase tracking-widest transition-all shadow-[0_0_20px_rgba(255,0,0,0.4)]"
                 >
-                  Mark Hazard
+                  Mark Location
                 </button>
                 <button 
                   onClick={() => setIsAlertOpen(false)} 
-                  className="flex-1 py-4 border border-white/20 hover:bg-white/5 text-white font-black text-xs uppercase tracking-widest transition-all"
+                  className="flex-1 py-4 border border-red-500/50 hover:bg-red-500/10 text-red-500 font-black text-xs uppercase tracking-widest transition-all"
                 >
-                  Ignore Uplink
+                  Track Next
                 </button>
               </div>
             </motion.div>
