@@ -183,6 +183,11 @@ export default function App() {
            }
         }
       }, 500);
+    } else {
+      // Reset sensors to safe values (10) when simulation is OFF
+      setSensorData({ ir: 10, metal: 10 });
+      setIrHistory(prev => [...prev.slice(1), 10]);
+      setMetalHistory(prev => [...prev.slice(1), 10]);
     }
     return () => clearInterval(interval);
   }, [isSimulating, isConnected, isAlertOpen]);
