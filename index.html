@@ -28,6 +28,7 @@
             height: 100vh;
             display: flex;
             flex-direction: column;
+            font-size: 16px;
         }
 
         /* --- BACKGROUND EFFECTS --- */
@@ -70,7 +71,7 @@
         }
 
         h1 {
-            font-size: 14px;
+            font-size: 18px;
             letter-spacing: 5px;
             color: var(--cyan);
             text-transform: uppercase;
@@ -78,12 +79,12 @@
         }
 
         .sys-status {
-            font-size: 10px;
+            font-size: 14px;
             font-weight: bold;
             text-transform: uppercase;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 15px;
         }
 
         .status-dot {
@@ -104,8 +105,8 @@
             background: transparent;
             border: 1px solid var(--cyan);
             color: var(--cyan);
-            padding: 10px 20px;
-            font-size: 12px;
+            padding: 12px 24px;
+            font-size: 14px;
             font-weight: bold;
             text-transform: uppercase;
             cursor: pointer;
@@ -151,7 +152,7 @@
         }
 
         #state-text {
-            font-size: 48px;
+            font-size: 64px;
             font-weight: 900;
             text-transform: uppercase;
             letter-spacing: -2px;
@@ -160,7 +161,7 @@
         }
 
         .state-desc {
-            font-size: 12px;
+            font-size: 16px;
             color: rgba(255, 255, 255, 0.5);
             text-transform: uppercase;
             letter-spacing: 5px;
@@ -203,19 +204,20 @@
         .meter-label {
             display: flex;
             justify-content: space-between;
-            font-size: 10px;
-            color: rgba(255, 255, 255, 0.5);
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.8);
             text-transform: uppercase;
             margin-bottom: 10px;
             font-weight: bold;
         }
 
         .meter-bar {
-            height: 10px;
+            height: 16px;
             background: rgba(255, 255, 255, 0.05);
-            border-radius: 5px;
+            border-radius: 8px;
             overflow: hidden;
             border: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
         }
 
         .progress {
@@ -224,11 +226,23 @@
             transition: 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
 
+        .flicker-anim {
+            animation: neon-flicker 0.2s ease-in-out;
+        }
+
+        @keyframes neon-flicker {
+            0% { opacity: 1; filter: brightness(1); }
+            20% { opacity: 0.7; filter: brightness(1.5); }
+            40% { opacity: 1; filter: brightness(1); }
+            60% { opacity: 0.8; filter: brightness(2); }
+            100% { opacity: 1; filter: brightness(1); }
+        }
+
         /* --- LOGS --- */
         #log-container {
             flex: 1;
             font-family: monospace;
-            font-size: 10px;
+            font-size: 12px;
             color: var(--cyan);
             overflow-y: auto;
             padding: 10px;
@@ -273,6 +287,68 @@
             100% { opacity: 0.3; }
         }
 
+        /* --- MODAL / POPUP --- */
+        #mine-modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 400px;
+            background: rgba(10, 25, 47, 0.95);
+            border: 2px solid var(--red);
+            box-shadow: 0 0 30px var(--red);
+            padding: 30px;
+            z-index: 2000;
+            display: none;
+            flex-direction: column;
+            gap: 20px;
+            text-align: center;
+            border-radius: 15px;
+            backdrop-filter: blur(15px);
+        }
+
+        #mine-modal h2 {
+            color: var(--red);
+            font-size: 24px;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px var(--red);
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
+
+        .btn {
+            padding: 12px 20px;
+            border: 1px solid var(--cyan);
+            background: transparent;
+            color: var(--cyan);
+            text-transform: uppercase;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+            font-size: 12px;
+        }
+
+        .btn:hover {
+            background: var(--cyan);
+            color: #000;
+            box-shadow: 0 0 15px var(--cyan);
+        }
+
+        .btn-red {
+            border-color: var(--red);
+            color: var(--red);
+        }
+
+        .btn-red:hover {
+            background: var(--red);
+            color: #fff;
+            box-shadow: 0 0 15px var(--red);
+        }
+
         ::-webkit-scrollbar { width: 5px; }
         ::-webkit-scrollbar-thumb { background: rgba(0, 242, 255, 0.2); border-radius: 10px; }
     </style>
@@ -281,6 +357,15 @@
     <div class="grid"></div>
     <div class="scanline"></div>
     <div id="alert-overlay"></div>
+
+    <div id="mine-modal">
+        <h2>⚠️ HAZARD DETECTED</h2>
+        <p style="font-size: 14px; opacity: 0.8;">MINE SIGNATURE CONFIRMED AT CURRENT COORDINATES.</p>
+        <div class="modal-buttons">
+            <button class="btn btn-red" id="mark-btn">Mark Location</button>
+            <button class="btn" id="track-btn">Track Next</button>
+        </div>
+    </div>
 
     <header>
         <h1>AEGIS SENTINEL MODULE</h1>
@@ -335,14 +420,14 @@
             </div>
             
             <div style="flex: 1; border: 1px dashed rgba(0, 242, 255, 0.1); border-radius: 5px; position: relative;">
-                <div style="position: absolute; top: 10px; left: 10px; font-size: 8px; color: rgba(255,255,255,0.2);">COORD-X: 0.00</div>
-                <div style="position: absolute; top: 25px; left: 10px; font-size: 8px; color: rgba(255,255,255,0.2);">COORD-Y: 0.00</div>
-                <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; opacity: 0.1;">
+                <div style="position: absolute; top: 10px; left: 10px; font-size: 10px; color: rgba(255,255,255,0.2);">COORD-X: 0.00</div>
+                <div style="position: absolute; top: 25px; left: 10px; font-size: 10px; color: rgba(255,255,255,0.2);">COORD-Y: 0.00</div>
+                <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; opacity: 0.1; font-size: 14px;">
                      SCANNING AREA...
                 </div>
             </div>
 
-            <div style="font-size: 9px; line-height: 1.5; color: rgba(255,255,255,0.3);">
+            <div style="font-size: 12px; line-height: 1.5; color: rgba(255,255,255,0.3);">
                 [!] WARNING: EXTREME CAUTION ADVISED IN FIELD <br>
                 [!] AUTO-BUZZER LOGIC ENABLED <br>
                 [!] NO SOFTWARE INSTALLATION REQUIRED
@@ -362,10 +447,16 @@
         const stateDesc = document.getElementById('state-desc');
         const overlay = document.getElementById('alert-overlay');
         const logs = document.getElementById('log-container');
+        const mineModal = document.getElementById('mine-modal');
+        const markBtn = document.getElementById('mark-btn');
+        const trackBtn = document.getElementById('track-btn');
 
         let port;
         let reader;
         let buffer = "";
+        let modalActive = false;
+        let lastModalTime = 0;
+        const MODAL_COOLDOWN = 10000; // 10 seconds cooldown if manually dismissed
 
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         let alarmInterval;
@@ -391,19 +482,22 @@
 
         async function connect() {
             if (!navigator.serial) {
-                addLog("CRITICAL: Web Serial API not found or restricted.");
-                alert("Web Serial API is not supported in this context. Please make sure you are using Google Chrome and have OPENED THIS APP IN A NEW TAB.");
+                addLog("CRITICAL: Web Serial API not found.");
+                alert("Please use Google Chrome and click the 'Open in New Tab' button top-right to enable hardware access.");
                 return;
             }
 
             try {
+                addLog("Requesting hardware port...");
                 port = await navigator.serial.requestPort();
+                
+                addLog("Opening uplink @ 9600 baud...");
                 await port.open({ baudRate: 9600 });
                 
                 statusText.textContent = "ONLINE";
                 statusDot.classList.add('online');
                 connectBtn.style.display = "none";
-                addLog("CONNECTED TO SERIAL PORT");
+                addLog("UPLINK ESTABLISHED SUCCESSFULLY");
 
                 const textDecoder = new TextDecoderStream();
                 const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
@@ -413,6 +507,19 @@
             } catch (err) {
                 console.error(err);
                 addLog(`ERROR: ${err.message}`);
+                
+                if (err.name === "NetworkError" || err.message.includes("Failed to open")) {
+                    addLog(">> CAUSE: Port is BUSY.");
+                    addLog(">> FIX: Close Arduino IDE Serial Monitor.");
+                } else if (err.name === "NotFoundError") {
+                    addLog(">> INFO: Selection cancelled.");
+                } else {
+                    addLog(">> ACTION: Re-plug USB and refresh page.");
+                }
+                
+                statusText.textContent = "READY";
+                statusDot.classList.remove('online');
+                connectBtn.style.display = "block";
             }
         }
 
@@ -465,9 +572,20 @@
         }
 
         function updateUI(ir, metal) {
-            // Update Meters
+            // Update Meters with flicker effect
             const irPercent = (ir / 10) * 100;
             const metalPercent = (metal / 10) * 100;
+
+            if (irProg.style.width !== `${irPercent}%`) {
+                irProg.classList.remove('flicker-anim');
+                void irProg.offsetWidth; // trigger reflow
+                irProg.classList.add('flicker-anim');
+            }
+            if (metalProg.style.width !== `${metalPercent}%`) {
+                metalProg.classList.remove('flicker-anim');
+                void metalProg.offsetWidth; // trigger reflow
+                metalProg.classList.add('flicker-anim');
+            }
 
             irProg.style.width = `${irPercent}%`;
             irTxt.textContent = `${ir}/10`;
@@ -475,7 +593,13 @@
             metalTxt.textContent = `${metal}/10`;
 
             // Logic Check
+            const now = Date.now();
             if (ir < 5 && metal < 5) {
+                if (!modalActive && (now - lastModalTime > MODAL_COOLDOWN)) {
+                    modalActive = true;
+                    mineModal.style.display = "flex";
+                    addLog("CRITICAL: MINE DETECTED - TERMINAL LOCKED");
+                }
                 triggerAlert("MINE DETECTED", "STOP IMMEDIATELY! HAZARD LOCKED.", "mine");
             } else if (ir < 5) {
                 triggerAlert("OBJECT FOUND", "OBSTRUCTION DETECTED - NO METAL CONTENT.", "object");
@@ -483,6 +607,22 @@
                 triggerAlert("AREA CLEAR", "SCANNING VECTOR... NO THREATS FOUND.", "clear");
             }
         }
+
+        markBtn.addEventListener('click', () => {
+            modalActive = false;
+            lastModalTime = Date.now();
+            mineModal.style.display = "none";
+            addLog("LOCATION MARKED ON TACTICAL GRID");
+            playBeep(1200, 0.3);
+        });
+
+        trackBtn.addEventListener('click', () => {
+            modalActive = false;
+            lastModalTime = Date.now();
+            mineModal.style.display = "none";
+            addLog("RESUMING TRACKING MODE");
+            playBeep(800, 0.2);
+        });
 
         function triggerAlert(title, desc, type) {
             mainState.textContent = title;
