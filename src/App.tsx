@@ -156,14 +156,46 @@ export default function App() {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logs]);
 
+  const [isSimulating, setIsSimulating] = useState(false);
+
+  // Simulation loop
+  useEffect(() => {
+    let interval: any;
+    if (isSimulating && !isConnected) {
+      interval = setInterval(() => {
+        const fakeIr = Math.floor(Math.random() * 4) + 6; // 6-10
+        const fakeMetal = Math.floor(Math.random() * 4) + 6; // 6-10
+        
+        // Occasional dip for hazard simulation
+        const isTrigger = Math.random() < 0.05;
+        const finalIr = isTrigger ? 2 : fakeIr;
+        const finalMetal = isTrigger ? 2 : fakeMetal;
+
+        setSensorData({ ir: finalIr, metal: finalMetal });
+        setIrHistory(prev => [...prev.slice(1), finalIr]);
+        setMetalHistory(prev => [...prev.slice(1), finalMetal]);
+
+        if (finalIr < 5 && finalMetal < 5) {
+           if (!isAlertOpen) {
+              setIsAlertOpen(true);
+              addMarker('MINE');
+              addLog("!! SIM_ALERT: VIRTUAL ORDNANCE LOCATED !!");
+           }
+        }
+      }, 500);
+    }
+    return () => clearInterval(interval);
+  }, [isSimulating, isConnected, isAlertOpen]);
+
   const connect = async () => {
     const nav = navigator as any;
     if (!nav.serial) {
        addLog("!! OS_ERROR: Web Serial unavailable.");
-       alert("Environment Alert: Web Serial API requires Chrome and a secure (HTTPS) context. If you are in the preview, click 'Open in New Tab' to grant hardware permissions.");
+       alert("CRITICAL: Web Serial API is blocked in this preview window.\n\nACTION REQUIRED:\n1. Click the 'Open in New Tab' button in the top right of the preview.\n2. In the new tab, click 'Establish Uplink' again.\n3. Your browser will then prompt you to select your Arduino USB port.");
        return;
     }
     try {
+      setIsSimulating(false); // Disable simulation on real connect
       const selectedPort = await nav.serial.requestPort();
       await selectedPort.open({ baudRate: 9600 });
       setPort(selectedPort);
@@ -185,29 +217,43 @@ export default function App() {
     }
   };
 
+  const serialBufferRef = useRef("");
+
   const handleIncomingData = (data: string) => {
-    const lines = data.split('\n');
+    serialBufferRef.current += data;
+    const lines = serialBufferRef.current.split('\n');
+    
+    // Keep the last piece (potential partial line) in the buffer
+    serialBufferRef.current = lines.pop() || "";
+
     lines.forEach(line => {
       const trimmed = line.trim();
       if (!trimmed) return;
 
+      // Extract sensor data tags
       if (trimmed.includes("[UI_DATA:")) {
         const match = trimmed.match(/\[UI_DATA:(\d+),(\d+)\]/);
         if (match) {
           const ir = parseInt(match[1]);
           const metal = parseInt(match[2]);
+          
           setSensorData({ ir, metal });
           setIrHistory(prev => [...prev.slice(1), ir]);
           setMetalHistory(prev => [...prev.slice(1), metal]);
 
+          // Check for hazard state (Low sum means active detections in this Arduino logic)
           if (ir < 5 && metal < 5) {
              if (!isAlertOpen) {
                 setIsAlertOpen(true);
                 addMarker('MINE');
-                addLog("!! HAZARD: EXPLOSIVE SIGNATURE CONFIRMED !!");
+                addLog("!! HAZARD: METALLIC ORDNANCE CONFIRMED BY FUSION !!");
              }
           }
         }
+      } else if (trimmed.includes("⚠️") || trimmed.includes("MINE")) {
+         addLog(`SIGNAL: ${trimmed}`);
+      } else if (trimmed.startsWith("Reading")) {
+         // Optionally log raw ticks for debugging
       }
     });
   };
@@ -284,6 +330,14 @@ export default function App() {
         
         <div className="flex gap-8 items-center">
           <div className="flex bg-black/40 border border-white/10 p-1 rounded-lg">
+             <button
+                onClick={() => setIsSimulating(!isSimulating)}
+                className={`flex items-center gap-2 px-4 py-2 text-[10px] font-black tracking-widest transition-all ${isSimulating ? 'bg-amber-500 text-black' : 'text-slate-400 hover:text-amber-400'}`}
+             >
+                {isSimulating ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Settings className="w-3 h-3" />}
+                SIM_MOCK
+             </button>
+             <div className="w-[1px] bg-white/10 mx-1" />
              <button 
                 onClick={() => setViewMode('DASHBOARD')}
                 className={`flex items-center gap-2 px-4 py-2 text-[10px] font-black tracking-widest transition-all ${viewMode === 'DASHBOARD' ? 'bg-cyan-500 text-black' : 'text-slate-400 hover:text-cyan-400'}`}
@@ -363,12 +417,12 @@ export default function App() {
                  </CyberPanel>
               </div>
 
-              {/* Center Column: Directives */}
+              {/* Center Column: Logistics & Handshake */}
               <div className="col-span-12 lg:col-span-3 flex flex-col gap-6">
                  <CyberPanel title="Protocol Handshake" icon={Lock} variant="cyan">
                     <div className="space-y-4">
                        <ProtocolLine label="AUTH_CRED" value="ROOT_VERIFIED" color="text-emerald-400" />
-                       <ProtocolLine label="PORT_IO" value="9600_BAUD" color="text-slate-300" />
+                       <ProtocolLine label="PORT_IO" value={isConnected ? "9600_UPLINK" : "LISTEN_MODE"} color={isConnected ? "text-cyan-400" : "text-amber-500"} />
                        <ProtocolLine label="SAT_LINK" value="GEO_LOK" color="text-cyan-400" />
                        <div className="pt-4 border-t border-white/5">
                           <div className="flex justify-between items-center mb-2">
@@ -382,16 +436,36 @@ export default function App() {
                     </div>
                  </CyberPanel>
 
+                 <CyberPanel title="Power Analysis" icon={Zap} variant="amber">
+                    <div className="space-y-3">
+                       <div className="flex justify-between items-center">
+                          <span className="text-[9px] text-white/40 uppercase">Bus_A (12V)</span>
+                          <span className="text-[10px] font-black text-amber-500">11.98 V</span>
+                       </div>
+                       <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                          <div className="h-full bg-amber-500 w-[95%] shadow-[0_0_5px_#ffaa00]" />
+                       </div>
+                       <div className="flex justify-between items-center pt-2">
+                          <span className="text-[9px] text-white/40 uppercase">Reg_B (5V)</span>
+                          <span className="text-[10px] font-black text-emerald-400">5.02 V</span>
+                       </div>
+                       <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                          <div className="h-full bg-emerald-400 w-[98%] shadow-[0_0_5px_#00ff92]" />
+                       </div>
+                       <p className="text-[8px] text-white/20 mt-2 font-bold tracking-tighter italic">OPTIMAL POWER GAIN FOR DELICATE ARDUINO BUS.</p>
+                    </div>
+                 </CyberPanel>
+
                  <CyberPanel title="Mission Directive" icon={Cpu} variant="amber" className="flex-1">
                     <div className="flex flex-col gap-6 h-full">
                        <div className="p-4 bg-white/5 border-l-4 border-cyan-400">
                           <b className="text-[10px] text-cyan-400 block mb-1 uppercase tracking-widest">Primary Task</b>
-                          <p className="text-[10px] text-slate-400 leading-relaxed font-bold">AUTO_DETECTION_ENGAGED. IDENTIFY METALLIC ANOMALIES WITHIN SECTOR_GAMMA.</p>
+                          <p className="text-[10px] text-slate-400 leading-relaxed font-bold">DETECTION_ACTIVE. SCAN GAMMA SECTOR FOR METALLIC DEVIATIONS.</p>
                        </div>
                        
                        <div className="p-4 bg-white/5 border-l-4 border-red-500/40">
-                          <b className="text-[10px] text-red-500 block mb-1 uppercase tracking-widest">Alert Rule</b>
-                          <p className="text-[10px] text-slate-400 leading-relaxed font-bold">IF IR & MASS DROP BELOW 5.0, STOP ALL MOTIONS IMMEDIATELY.</p>
+                          <b className="text-[10px] text-red-500 block mb-1 uppercase tracking-widest">Fail-Safe</b>
+                          <p className="text-[10px] text-slate-400 leading-relaxed font-bold">EMERGENCY_LOCKDOWN IF IR/MASS SUM DROPS BELOW CRITICAL THRESHOLD (5.0).</p>
                        </div>
                     </div>
                  </CyberPanel>
