@@ -6,13 +6,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { 
   AlertTriangle, 
-  Cpu, 
-  RefreshCw, 
   Settings, 
   Terminal,
   Map as MapIcon,
   Zap,
-  Activity
+  Activity,
+  Shield,
+  Radio,
+  Lock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -33,15 +34,17 @@ interface SensorData {
 export default function App() {
   const [port, setPort] = useState<SerialPort | null>(null);
   const [sensorData, setSensorData] = useState<SensorData>({ ir: 10, metal: 10 });
-  const [logs, setLogs] = useState<string[]>([]);
+  const [logs, setLogs] = useState<{time: string, msg: string}[]>([]);
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [markers, setMarkers] = useState<Marker[]>([]);
+  const [irHistory, setIrHistory] = useState<number[]>(Array(100).fill(5));
+  const [metalHistory, setMetalHistory] = useState<number[]>(Array(100).fill(5));
   
   const logRef = useRef<HTMLDivElement>(null);
 
   const addLog = (msg: string) => {
-    setLogs(prev => [...prev.slice(-20), `${new Date().toLocaleTimeString()} ${msg}`]);
+    setLogs(prev => [...prev.slice(-40), { time: new Date().toLocaleTimeString(), msg }]);
   };
 
   useEffect(() => {
@@ -49,12 +52,16 @@ export default function App() {
   }, [logs]);
 
   const connect = async () => {
+    if (!(navigator as any).serial) {
+       alert("Web Serial API required. Please use Chrome.");
+       return;
+    }
     try {
       const selectedPort = await (navigator as any).serial.requestPort();
       await selectedPort.open({ baudRate: 9600 });
       setPort(selectedPort);
       setIsConnected(true);
-      addLog(">> Uplink established. Aegis Terminal ready.");
+      addLog("SYNC SUCCESS: SATELLITE UPLINK ESTABLISHED.");
       
       const textDecoder = new TextDecoderStream();
       selectedPort.readable.pipeTo(textDecoder.writable);
@@ -65,9 +72,9 @@ export default function App() {
         if (done) break;
         if (value) handleIncomingData(value);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      addLog(">> Link Failure: Connection interrupted.");
+      addLog(`CRITICAL ERROR: ${err.message}`);
     }
   };
 
@@ -77,297 +84,262 @@ export default function App() {
       const trimmed = line.trim();
       if (!trimmed) return;
 
-      // 1. Data Parsing [UI_DATA:ir,metal]
       if (trimmed.includes("[UI_DATA:")) {
         const match = trimmed.match(/\[UI_DATA:(\d+),(\d+)\]/);
         if (match) {
-          setSensorData({ ir: parseInt(match[1]), metal: parseInt(match[2]) });
+          const ir = parseInt(match[1]);
+          const metal = parseInt(match[2]);
+          setSensorData({ ir, metal });
+          setIrHistory(prev => [...prev.slice(1), ir]);
+          setMetalHistory(prev => [...prev.slice(1), metal]);
+
+          if (ir < 5 && metal < 5) {
+             if (!isAlertOpen) {
+                setIsAlertOpen(true);
+                addMarker('MINE');
+                addLog("!! HAZARD: EXPLOSIVE SIGNATURE CONFIRMED !!");
+             }
+          }
         }
       }
-
-      // 2. Alert Handling
-      if (trimmed.includes("⚠️ MINE DETECTED!")) {
-        setIsAlertOpen(true);
-        addMarker('MINE');
-        addLog("!! CRITICAL HAZARD IDENTIFIED !!");
-      } else if (trimmed.includes("Object Detected but NO metal")) {
-        addMarker('OBJECT');
-        addLog(">> Non-metallic obstruction found.");
-      } else if (trimmed.includes("No Object")) {
-        addLog(">> Vector Clear.");
-      }
-
-      if (trimmed.startsWith("Reading")) return; // Skip sub-readings for cleaner logs
-      addLog(trimmed);
     });
   };
 
   const addMarker = (type: 'MINE' | 'OBJECT') => {
-    const newMarker: Marker = {
+    setMarkers(prev => [{
       id: Date.now(),
-      x: Math.random() * 80 + 10, // Simulated relative coordinates
+      x: Math.random() * 80 + 10,
       y: Math.random() * 80 + 10,
       type,
       timestamp: new Date().toLocaleTimeString(),
-    };
-    setMarkers(prev => [newMarker, ...prev].slice(0, 50));
+    }, ...prev].slice(0, 50));
   };
 
-  const arduinoCode = `const int irPin = 2;
-const int metalPin = 3;
-
-const int size = 10;
-int irArray[size];
-int metalArray[size];
-
-void scanSensors(int index);
-
-void setup() {
-  pinMode(irPin, INPUT);
-  pinMode(metalPin, INPUT_PULLUP);
-  Serial.begin(9600);
-}
-
-void loop() {
-  Serial.println("---- NEW SCAN ----");
-  scanSensors(0);
-  delay(1000);
-}
-
-void scanSensors(int index) {
-  if (index >= size) {
-    int irSum = 0;
-    int metalSum = 0;
-    for (int i = 0; i < size; i++) {
-      irSum += irArray[i];
-      metalSum += metalArray[i];
-    }
-
-    // Dashboard identifies these tags: [UI_DATA:irSum,metalSum]
-    Serial.print("[UI_DATA:");
-    Serial.print(irSum);
-    Serial.print(",");
-    Serial.print(metalSum);
-    Serial.println("]");
-
-    if (irSum < size/2 && metalSum < size/2) {
-      Serial.println("⚠️ MINE DETECTED!");
-    }
-    else if (irSum < size/2) {
-      Serial.println("Object Detected but NO metal");
-    }
-    else {
-      Serial.println("No Object");
-    }
-    Serial.println("-------------------");
-    return;
-  }
-
-  irArray[index] = digitalRead(irPin);
-  metalArray[index] = digitalRead(metalPin);
-  
-  Serial.print("Reading "); Serial.print(index);
-  Serial.print(" -> IR: "); Serial.print(irArray[index]);
-  Serial.print(" | Metal: "); Serial.println(metalArray[index]);
-
-  delay(100);
-  scanSensors(index + 1);
-}`;
+  const isHazard = sensorData.ir < 5 && sensorData.metal < 5;
 
   return (
-    <div className="min-h-screen bg-[#020408] text-slate-200 font-sans relative overflow-hidden flex flex-col">
-      {/* Immersive Background Effects */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,_rgba(14,42,71,0.4)_0%,_transparent_70%)] pointer-events-none" />
-      <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'linear-gradient(#1e293b 1px, transparent 1px), linear-gradient(90deg, #1e293b 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
-
+    <div className={`min-h-screen ${isHazard ? 'bg-[#0a0202]' : 'bg-[#010206]'} text-slate-200 font-mono relative overflow-hidden flex flex-col transition-colors duration-500`}>
+      {/* Immersive Scanline & Grid */}
+      <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: `linear-gradient(${isHazard ? 'rgba(255,0,0,0.1)' : 'rgba(0,136,255,0.05)'} 1px, transparent 1px), linear-gradient(90deg, ${isHazard ? 'rgba(255,0,0,0.1)' : 'rgba(0,136,255,0.05)'} 1px, transparent 1px)`, backgroundSize: '40px 40px' }} />
+      
       {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-8 py-6 border-b border-white/5 bg-black/20 backdrop-blur-sm">
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 bg-cyan-500/20 border border-cyan-500/50 rounded-lg flex items-center justify-center shadow-[0_0_15px_rgba(6,182,212,0.2)]">
-            <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-cyan-400 animate-pulse' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]'}`} />
+      <header className={`relative z-10 flex items-center justify-between px-10 py-6 border-b transition-colors ${isHazard ? 'border-red-500/30' : 'border-blue-500/20'} bg-black/60 backdrop-blur-xl`}>
+        <div className="flex items-center gap-6">
+          <div className={`w-12 h-12 border ${isHazard ? 'border-red-500 shadow-[0_0_20px_rgba(255,0,0,0.3)]' : 'border-blue-500 shadow-[0_0_20px_rgba(0,136,255,0.3)]'} transform rotate-45 flex items-center justify-center transition-all`}>
+             <Shield className={`w-6 h-6 -rotate-45 ${isHazard ? 'text-red-500' : 'text-blue-500'}`} />
           </div>
           <div>
-            <h1 className="text-xs font-bold tracking-[0.3em] uppercase text-cyan-400 leading-none mb-1">Aegis Sentinel v2.4</h1>
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest leading-none">Field Mine Detection System (Active)</p>
+            <h1 className={`text-sm font-bold tracking-[0.5em] uppercase leading-none mb-1 transition-colors ${isHazard ? 'text-red-500' : 'text-blue-500'}`}>Aegis Tactical Command</h1>
+            <p className="text-[9px] text-slate-500 uppercase tracking-widest leading-none">Sector Scan: Gamma-9 // Secure Encryption Active</p>
           </div>
         </div>
         
-        <div className="flex gap-4">
+        <div className="flex gap-6 items-center">
           {!isConnected && (
              <button 
                 onClick={connect}
-                className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-[10px] uppercase font-bold tracking-widest rounded transition-all border border-cyan-400/30 shadow-[0_0_20px_rgba(6,182,212,0.2)]"
+                className="px-6 py-2 bg-blue-600/10 hover:bg-blue-600 text-blue-500 hover:text-black text-[10px] uppercase font-bold tracking-widest transition-all border border-blue-500/50 [clip-path:polygon(10%_0,100%_0,90%_100%,0_%100%)]"
               >
-                Establish Satellite Link
+                Establish Uplink
               </button>
           )}
-          <div className="flex items-center gap-2 px-4 py-2 border border-white/5 bg-black/20 rounded">
-             <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'} shadow-sm`} />
-             <span className="text-[9px] font-mono text-slate-400 uppercase tracking-widest">{isConnected ? 'Uplink Stable' : 'No Signal'}</span>
+          <div className="flex items-center gap-3 px-4 py-2 bg-black/40 border border-white/5 rounded-sm">
+             <Radio className={`w-3 h-3 ${isConnected ? 'text-blue-400 animate-pulse' : 'text-red-500'}`} />
+             <span className="text-[10px] font-mono text-slate-400 tracking-tighter">{isConnected ? '[ ENCRYPTED ]' : '[ OFFLINE ]'}</span>
           </div>
         </div>
       </header>
 
-      <main className="relative z-10 grid grid-cols-12 gap-6 p-8 flex-1 overflow-hidden">
+      <main className="relative z-10 grid grid-cols-12 gap-4 p-4 flex-1 overflow-hidden">
         
-        {/* Left Column: Map & Telemetry */}
-        <div className="col-span-12 lg:col-span-7 flex flex-col gap-6">
-          <div className="relative flex-1 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-md overflow-hidden group min-h-[400px]">
-            {/* Grid & Radar Overlay */}
-            <div className="absolute inset-0 flex items-center justify-center opacity-10 pointer-events-none">
-                <div className="w-[150%] aspect-square border border-cyan-500/10 rounded-full" />
-                <div className="w-[80%] aspect-square border border-cyan-500/20 rounded-full" />
-                <div className="w-[40%] aspect-square border border-cyan-500/30 rounded-full" />
-                <div className="absolute top-1/2 left-0 w-full h-[1px] bg-cyan-500/20" />
-                <div className="absolute left-1/2 top-0 w-[1px] h-full bg-cyan-500/20" />
-            </div>
+        {/* Left Column: Wave Analysis */}
+        <div className="col-span-12 lg:col-span-3 flex flex-col gap-4">
+           {/* IR Panel */}
+           <div className={`p-6 border ${isHazard ? 'border-red-500/20' : 'border-blue-500/20'} bg-black/40 flex flex-col gap-4 relative overflow-hidden`}>
+              <div className="flex justify-between items-center text-[9px] font-bold text-slate-500 tracking-widest opacity-60">
+                 <span>BIOMETRIC IR SCAN</span>
+                 <Activity className="w-3 h-3 text-blue-400" />
+              </div>
+              <div className="flex justify-between items-baseline">
+                <span className={`text-3xl font-black ${isHazard ? 'text-red-500' : 'text-blue-400'}`}>{sensorData.ir}.0</span>
+                <span className="text-[10px] opacity-30">PULSE / SEC</span>
+              </div>
+              <ECGWave data={irHistory} color={isHazard ? '#ff003c' : '#0088ff'} />
+              <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                 <motion.div animate={{ width: `${(sensorData.ir / 10) * 100}%` }} className={`h-full ${isHazard ? 'bg-red-600' : 'bg-blue-600'}`} />
+              </div>
+           </div>
 
-            <div className="absolute top-6 left-8 flex items-center gap-3">
-              <MapIcon className="w-4 h-4 text-cyan-400" />
-              <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tactical Session Map</h2>
-            </div>
+           {/* Metal Panel */}
+           <div className={`p-6 border ${isHazard ? 'border-red-500/20' : 'border-blue-500/20'} bg-black/40 flex flex-col gap-4 relative overflow-hidden`}>
+              <div className="flex justify-between items-center text-[9px] font-bold text-slate-500 tracking-widest opacity-60">
+                 <span>MAGNETIC MASS</span>
+                 <Zap className="w-3 h-3 text-amber-500" />
+              </div>
+              <div className="flex justify-between items-baseline">
+                <span className="text-3xl font-black text-amber-500">{sensorData.metal}.0</span>
+                <span className="text-[10px] opacity-30">Tesla Coef</span>
+              </div>
+              <ECGWave data={metalHistory} color="#ffaa00" />
+              <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                 <motion.div animate={{ width: `${(sensorData.metal / 10) * 100}%` }} className="h-full bg-amber-600" />
+              </div>
+           </div>
 
-            {/* Plot Markers */}
-            <div className="relative w-full h-full p-12">
-              {markers.map((m) => (
-                <motion.div
-                  key={m.id}
-                  initial={{ scale: 0, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  className={`absolute w-4 h-4 -ml-2 -mt-2 rounded-full border-2 cursor-help group/marker ${m.type === 'MINE' ? 'bg-red-500/50 border-red-400 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : 'bg-amber-500/50 border-amber-400'}`}
-                  style={{ left: `${m.x}%`, top: `${m.y}%` }}
-                >
-                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-black/90 text-[8px] border border-white/10 rounded whitespace-nowrap opacity-0 group-hover/marker:opacity-100 transition-opacity z-30 font-mono">
-                      {m.type} @ {m.timestamp}
-                   </div>
-                   {m.type === 'MINE' && <div className="absolute inset-[-4px] border-2 border-red-500 rounded-full animate-ping opacity-30" />}
-                </motion.div>
-              ))}
-              {markers.length === 0 && (
-                <div className="absolute inset-0 flex items-center justify-center opacity-10 pointer-events-none">
-                  <span className="text-[10px] uppercase tracking-[0.8em] font-bold">Scanning Vectors</span>
-                </div>
-              )}
-            </div>
-
-            <div className="absolute bottom-6 left-8 flex gap-6 font-mono text-[9px] text-slate-500 uppercase tracking-widest">
-              <span>Markers: {markers.length}</span>
-              <span className="text-red-400/50">Hazards: {markers.filter(m => m.type === 'MINE').length}</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-6 h-32">
-             <SensorBadge label="IR Density" value={sensorData.ir} color="text-cyan-400" barColor="bg-cyan-500" icon={<Activity className="w-3 h-3" />} />
-             <SensorBadge label="Metal Content" value={sensorData.metal} color="text-amber-400" barColor="bg-amber-500" icon={<Zap className="w-3 h-3" />} />
-          </div>
-        </div>
-
-        {/* Right Column: Terminal & Docs */}
-        <div className="col-span-12 lg:col-span-5 flex flex-col gap-6 overflow-hidden">
-          {/* Live Terminal */}
-          <div className="flex-1 bg-white/5 border border-white/10 rounded-2xl overflow-hidden flex flex-col min-h-0">
-             <div className="px-6 py-4 bg-black/20 border-b border-white/5 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                   <Terminal className="w-3 h-3 text-cyan-400" />
-                   <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest tracking-tighter">Live Uplink Stream</h2>
-                </div>
-                <div className="flex gap-1.5">
-                   <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                   <div className="w-1.5 h-1.5 rounded-full bg-slate-700" />
-                </div>
-             </div>
-             <div ref={logRef} className="p-6 font-mono text-[10px] text-cyan-400/80 overflow-y-auto space-y-2 flex-1 scrollbar-thin scrollbar-thumb-white/10">
-                {logs.length === 0 && <p className="opacity-20 italic">Waiting for telemetry heartbeat...</p>}
-                {logs.map((log, i) => (
-                  <div key={i} className={`flex gap-3 leading-tight ${log.includes('MINE') ? 'text-red-400 font-bold' : ''}`}>
-                    <span className="opacity-30 flex-shrink-0">[{i}]</span>
-                    <span>{log}</span>
+           {/* Log Terminal */}
+           <div className="flex-1 bg-black/40 border border-white/5 flex flex-col overflow-hidden">
+              <div className="px-4 py-2 border-b border-white/5 text-[9px] text-slate-500 font-bold uppercase tracking-widest">System Archive</div>
+              <div ref={logRef} className="p-4 overflow-y-auto space-y-1 font-mono text-[9px] text-blue-400/60 h-full">
+                {logs.map((l, i) => (
+                  <div key={i} className={`flex gap-2 ${l.msg.includes('HAZARD') ? 'text-red-500' : ''}`}>
+                    <span className="opacity-20 flex-shrink-0">[{l.time.split(':')[2]}]</span>
+                    <span>{l.msg}</span>
                   </div>
                 ))}
-             </div>
-          </div>
+              </div>
+           </div>
+        </div>
 
-          {/* Code Reference */}
-          <div className="p-5 bg-white/5 border border-white/10 rounded-2xl flex flex-col overflow-hidden max-h-48 group">
-             <div className="flex items-center justify-between mb-3 text-[10px] font-bold uppercase text-slate-400">
-                <div className="flex items-center gap-2">
-                   <Settings className="w-3 h-3 text-cyan-400" />
-                   <span>Arduino IDE Template</span>
-                </div>
-                <button onClick={() => navigator.clipboard.writeText(arduinoCode)} className="text-[8px] text-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-widest">Copy Source</button>
-             </div>
-             <div className="bg-black/60 rounded p-3 font-mono text-[9px] text-cyan-400/40 overflow-y-auto scrollbar-none flex-1">
-                <pre>{arduinoCode}</pre>
-             </div>
-          </div>
+        {/* Center Panel: Main Radar */}
+        <div className="col-span-12 lg:col-span-6 flex flex-col gap-4">
+           <div className={`flex-1 border transition-colors ${isHazard ? 'border-red-500/40 bg-red-500/5' : 'border-blue-500/20 bg-blue-500/5'} relative overflow-hidden rounded-sm flex flex-col items-center justify-center`}>
+              {/* Radar Rings */}
+              <div className="absolute inset-0 flex items-center justify-center opacity-5 pointer-events-none">
+                 {[1, 2, 3, 4].map(i => (
+                   <div key={i} className={`absolute border rounded-full ${isHazard ? 'border-red-500' : 'border-blue-500'}`} style={{ width: `${i * 25}%`, height: `${i * 25}%` }} />
+                 ))}
+                 <div className={`absolute w-full h-[1px] ${isHazard ? 'bg-red-500' : 'bg-blue-500'}`} />
+                 <div className={`absolute h-full w-[1px] ${isHazard ? 'bg-red-500' : 'bg-blue-500'}`} />
+              </div>
+
+              <div className="text-center z-20">
+                <motion.h2 
+                  animate={isHazard ? { scale: [1, 1.1, 1] } : { scale: 1 }}
+                  transition={{ duration: 0.5, repeat: isHazard ? Infinity : 0 }}
+                  className={`text-7xl font-black uppercase tracking-tighter leading-none mb-2 ${isHazard ? 'text-red-500' : 'text-blue-500'}`}
+                >
+                  {isHazard ? 'HAZARD DETECTED' : 'Scanning'}
+                </motion.h2>
+                <p className="text-[10px] text-slate-500 uppercase tracking-[0.5em]">{isHazard ? 'PROXIMITY WARNING ACTIVE' : 'Vector Search in Progress'}</p>
+              </div>
+
+              {/* Tactical Points */}
+              <div className="absolute inset-0">
+                {markers.map(m => (
+                  <motion.div
+                    key={m.id}
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className={`absolute w-3 h-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 ${m.type === 'MINE' ? 'bg-red-500 border-white shadow-[0_0_15px_rgba(255,0,0,1)]' : 'bg-amber-500 border-black'}`}
+                    style={{ left: `${m.x}%`, top: `${m.y}%` }}
+                  />
+                ))}
+              </div>
+           </div>
+        </div>
+
+        {/* Right Column: Tactical Intel */}
+        <div className="col-span-12 lg:col-span-3 flex flex-col gap-4">
+           {/* System Metadata */}
+           <div className="p-6 border border-white/5 bg-black/40 space-y-4">
+              <div className="flex items-center gap-3 text-blue-400">
+                 <Lock className="w-3 h-3" />
+                 <span className="text-[9px] font-bold uppercase tracking-widest">Tactical Protocols</span>
+              </div>
+              <div className="space-y-2">
+                 <ProtocolLine label="Auth Status" value="Verified" color="text-green-500" />
+                 <ProtocolLine label="Hardware Port" value="9600 BAUD" color="text-slate-400" />
+                 <ProtocolLine label="Satellite" value="Locked" color="text-blue-400" />
+              </div>
+           </div>
+
+           {/* Mission Profile */}
+           <div className="flex-1 p-6 border border-white/5 bg-black/40 flex flex-col gap-6">
+              <div className="flex items-center gap-3 text-slate-400">
+                 <Terminal className="w-3 h-3" />
+                 <span className="text-[9px] font-bold uppercase tracking-widest">Mission Readout</span>
+              </div>
+              <div className="text-[10px] text-slate-500 leading-relaxed space-y-4">
+                 <div className="border-l-2 border-blue-500 pl-4 py-1">
+                    <b className="text-blue-500 block mb-1 uppercase tracking-widest">Objective:</b>
+                    Locate and neutralize sub-surface explosives.
+                 </div>
+                 <div className="border-l-2 border-red-500/40 pl-4 py-1">
+                    <b className="text-red-500 block mb-1 uppercase tracking-widest">Field Rule:</b>
+                    Confirmed hazard signature identified. Stop all movement.
+                 </div>
+              </div>
+           </div>
         </div>
       </main>
 
       {/* ALERT MODAL */}
       <AnimatePresence>
         {isAlertOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
-            <motion.div 
-               initial={{ opacity: 0 }} 
-               animate={{ opacity: 1 }} 
-               exit={{ opacity: 0 }} 
-               className="absolute inset-0 bg-red-950/80 backdrop-blur-xl" 
-               onClick={() => setIsAlertOpen(false)}
-            />
+          <div className="fixed inset-0 z-[5000] flex items-center justify-center p-6">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-black/95 backdrop-blur-2xl" />
             <motion.div
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="relative w-full max-w-md bg-[#1a0a0a] border-2 border-red-500/50 rounded-2xl p-10 text-center shadow-[0_0_100px_rgba(239,68,68,0.4)]"
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative w-full max-w-xl bg-black border-2 border-red-500 p-12 text-center shadow-[0_0_80px_rgba(255,0,0,0.4)]"
             >
-              <div className="w-20 h-20 bg-red-500 rounded-full mx-auto mb-8 flex items-center justify-center shadow-[0_0_30px_rgba(239,68,68,0.6)]">
-                 <AlertTriangle className="w-10 h-10 text-white animate-bounce" />
+              <div className="w-24 h-24 border-2 border-red-500 rounded-full mx-auto mb-10 flex items-center justify-center rotate-45">
+                 <AlertTriangle className="w-12 h-12 text-red-500 -rotate-45 animate-pulse" />
               </div>
-              <h3 className="text-4xl font-black text-white uppercase tracking-tighter mb-4">Mine Detected!!</h3>
-              <p className="text-red-200/70 text-[11px] mb-10 font-mono uppercase tracking-[0.2em] leading-relaxed">
-                Confirmed Hazard Signature Identified. <br/>
-                Physical Warning Active.
+              <h3 className="text-5xl font-black text-red-500 uppercase tracking-tighter mb-4 italic">Hazard Identified</h3>
+              <p className="text-slate-400 text-xs mb-12 font-mono uppercase tracking-[0.3em] leading-loose">
+                MINE SIGNATURE CONFIRMED. STOP ALL MOVEMENT IMMEDIATELY.
               </p>
               
-              <button 
-                onClick={() => setIsAlertOpen(false)} 
-                className="w-full py-5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-all shadow-xl active:scale-95 uppercase tracking-widest text-xs border border-red-400/50"
-              >
-                Find Another
-              </button>
+              <div className="flex gap-6">
+                <button 
+                  onClick={() => setIsAlertOpen(false)} 
+                  className="flex-1 py-4 bg-red-600 hover:bg-red-500 text-white font-black text-xs uppercase tracking-widest transition-all"
+                >
+                  Mark Hazard
+                </button>
+                <button 
+                  onClick={() => setIsAlertOpen(false)} 
+                  className="flex-1 py-4 border border-white/20 hover:bg-white/5 text-white font-black text-xs uppercase tracking-widest transition-all"
+                >
+                  Ignore Uplink
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
       </AnimatePresence>
 
-      <footer className="relative z-20 px-8 py-3 bg-cyan-500/10 border-t border-cyan-500/20 flex justify-between items-center backdrop-blur-md">
-        <div className="text-[9px] text-cyan-400/40 uppercase tracking-[0.3em] font-bold">Secure Tactical Uplink Active</div>
-        <div className="text-[9px] text-slate-600 uppercase font-mono">Hardware Port: 9600 Baud</div>
+      <footer className={`relative z-20 px-10 py-3 ${isHazard ? 'bg-red-500/10' : 'bg-blue-500/10'} border-t border-white/5 flex justify-between items-center backdrop-blur-md`}>
+        <div className="text-[9px] text-slate-500 uppercase tracking-[0.2em] font-bold">Aegis Tactical Sentinel // Local Uplink Stable</div>
+        <div className="text-[9px] text-slate-600 font-mono">PORT_ID: X9-COM3 // 9600_BAUD</div>
       </footer>
     </div>
   );
 }
 
-function SensorBadge({ label, value, color, barColor, icon }: { label: string, value: number, color: string, barColor: string, icon: any }) {
-  const percentage = (value / 10) * 100;
+function ECGWave({ data, color }: { data: number[], color: string }) {
   return (
-    <div className="bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col justify-between relative overflow-hidden group">
-      <div className="flex justify-between items-start">
-        <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{label}</div>
-        <div className={`${color} group-hover:scale-110 transition-transform`}>{icon}</div>
-      </div>
-      <div className="flex items-baseline justify-between mt-2">
-        <span className={`text-2xl font-mono font-bold leading-none ${color}`}>{value}</span>
-        <span className="text-[8px] text-slate-600 font-bold uppercase tracking-widest">/ 10 max</span>
-      </div>
-      {/* Progress Line */}
-      <div className="absolute bottom-0 left-0 w-full h-[1px] bg-white/5">
-         <motion.div 
-           initial={{ width: 0 }} 
-           animate={{ width: `${percentage}%` }} 
-           className={`h-full ${barColor} shadow-[0_0_10px_rgba(6,182,212,0.5)]`}
-         />
-      </div>
+    <div className="w-full h-20 bg-black/40 border border-white/5 relative overflow-hidden">
+       <svg className="w-full h-full overflow-visible" viewBox="0 0 100 20" preserveAspectRatio="none">
+          <polyline
+             fill="none"
+             stroke={color}
+             strokeWidth="0.5"
+             points={data.map((v, i) => `${i},${20 - (v / 10 * 16 + 2)}`).join(' ')}
+             className="transition-all duration-300"
+          />
+       </svg>
+    </div>
+  );
+}
+
+function ProtocolLine({ label, value, color }: { label: string, value: string, color: string }) {
+  return (
+    <div className="flex justify-between items-center text-[9px] border-b border-white/5 pb-2 last:border-0 uppercase tracking-tighter">
+       <span className="text-slate-500">{label}</span>
+       <span className={color}>{value}</span>
     </div>
   );
 }
