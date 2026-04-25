@@ -134,8 +134,8 @@ export default function App() {
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [markers, setMarkers] = useState<Marker[]>([]);
-  const [irHistory, setIrHistory] = useState<number[]>(Array(100).fill(5));
-  const [metalHistory, setMetalHistory] = useState<number[]>(Array(100).fill(5));
+  const [irHistory, setIrHistory] = useState<number[]>(Array(100).fill(10));
+  const [metalHistory, setMetalHistory] = useState<number[]>(Array(100).fill(10));
   const [currentPosition, setCurrentPosition] = useState({ lat: 18.989, lng: 73.117 }); // Default: Navi Mumbai (VIMEET)
 
   useEffect(() => {
@@ -207,14 +207,26 @@ export default function App() {
       setIsConnected(true);
       addLog("SYNC SUCCESS: SATELLITE UPLINK ESTABLISHED.");
       
-      const textDecoder = new TextDecoderStream();
-      selectedPort.readable.pipeTo(textDecoder.writable);
-      const reader = textDecoder.readable.getReader();
+      const reader = selectedPort.readable.getReader();
+      const decoder = new TextDecoder();
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (value) handleIncomingData(value);
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) {
+            addLog("!! SIGNAL LOST: PORT CLOSED INTERNALLY.");
+            break;
+          }
+          if (value) {
+            const decoded = decoder.decode(value, { stream: true });
+            handleIncomingData(decoded);
+          }
+        }
+      } catch (err: any) {
+        addLog(`READER ERROR: ${err.message}`);
+      } finally {
+        reader.releaseLock();
+        setIsConnected(false);
       }
     } catch (err: any) {
       console.error(err);
@@ -225,8 +237,12 @@ export default function App() {
   const serialBufferRef = useRef("");
 
   const handleIncomingData = (data: string) => {
+    // Debug log to confirm data reception (Truncated to first line)
+    const firstChunk = data.split('\n')[0].trim();
+    if (firstChunk) addLog(`INBOUND >> ${firstChunk.substring(0, 30)}`); 
+
     serialBufferRef.current += data;
-    const lines = serialBufferRef.current.split('\n');
+    const lines = serialBufferRef.current.split(/\r?\n/);
     
     // Keep the last piece (potential partial line) in the buffer
     serialBufferRef.current = lines.pop() || "";
@@ -235,30 +251,39 @@ export default function App() {
       const trimmed = line.trim();
       if (!trimmed) return;
 
-      // Extract sensor data tags
-      if (trimmed.includes("[UI_DATA:")) {
-        const match = trimmed.match(/\[UI_DATA:(\d+),(\d+)\]/);
-        if (match) {
-          const ir = parseInt(match[1]);
-          const metal = parseInt(match[2]);
-          
-          setSensorData({ ir, metal });
-          setIrHistory(prev => [...prev.slice(1), ir]);
-          setMetalHistory(prev => [...prev.slice(1), metal]);
+      // Robust regex for [UI_DATA:ir,metal] with optional spaces
+      const dataMatch = trimmed.match(/\[UI_DATA:\s*(\d+)\s*,\s*(\d+)\s*\]/);
+      
+      if (dataMatch) {
+        const ir = parseInt(dataMatch[1]);
+        const metal = parseInt(dataMatch[2]);
+        
+        setSensorData({ ir, metal });
+        setIrHistory(prev => [...prev.slice(1), ir]);
+        setMetalHistory(prev => [...prev.slice(1), metal]);
 
-          // Check for hazard state (Low sum means active detections in this Arduino logic)
-          if (ir < 5 && metal < 5) {
-             if (!isAlertOpen) {
-                setIsAlertOpen(true);
-                addMarker('MINE');
-                addLog("!! HAZARD: METALLIC ORDNANCE CONFIRMED BY FUSION !!");
-             }
-          }
+        // Feedback in log if it actually changed
+        if (ir !== 10 || metal !== 10) {
+          addLog(`DATA CHG: IR=${ir}, MET=${metal}`);
+        }
+
+        // Check for hazard state (Low sum means active detections in this Arduino logic)
+        if (ir < 5 && metal < 5) {
+           if (!isAlertOpen) {
+              setIsAlertOpen(true);
+              addMarker('MINE');
+              addLog("!! HAZARD: METALLIC ORDNANCE CONFIRMED BY FUSION !!");
+           }
         }
       } else if (trimmed.includes("⚠️") || trimmed.includes("MINE")) {
          addLog(`SIGNAL: ${trimmed}`);
       } else if (trimmed.startsWith("Reading")) {
-         // Optionally log raw ticks for debugging
+         // Silently ignore internal Arduino loop logs
+      } else if (trimmed.includes("--- NEW SCAN ---")) {
+         addLog("PULSE: REMOTE SCAN CYCLE INITIATED");
+      } else {
+         // Log any other unexpected serial strings for debugging
+         addLog(`STR: ${trimmed}`);
       }
     });
   };
@@ -396,7 +421,7 @@ export default function App() {
               <div className="col-span-12 lg:col-span-4 flex flex-col gap-6 overflow-hidden">
                  <CyberPanel title="Neural IR Signature" icon={Activity} variant={isHazard ? 'red' : 'cyan'}>
                     <div className="flex justify-between items-baseline mb-2">
-                       <span className={`text-4xl font-black ${isHazard ? 'text-red-500' : 'text-cyan-400'} tracking-tighter`}>{sensorData.ir}.0<span className="text-sm opacity-50 ml-1">Hz</span></span>
+                       <span className={`text-4xl font-black ${isHazard ? 'text-red-500' : 'text-cyan-400'} tracking-tighter`}>{sensorData.ir.toFixed(1)}<span className="text-sm opacity-50 ml-1">Hz</span></span>
                        <div className="text-[8px] opacity-30">SIGNAL_LEVEL</div>
                     </div>
                     <ECGWave data={irHistory} color={isHazard ? '#ff003c' : '#00f2ff'} />
@@ -404,7 +429,7 @@ export default function App() {
 
                  <CyberPanel title="Magnetic Mass Spectrometer" icon={Zap} variant="amber">
                     <div className="flex justify-between items-baseline mb-2">
-                       <span className="text-4xl font-black text-amber-500 tracking-tighter">{sensorData.metal}.0<span className="text-sm opacity-50 ml-1">μT</span></span>
+                       <span className="text-4xl font-black text-amber-500 tracking-tighter">{sensorData.metal.toFixed(1)}<span className="text-sm opacity-50 ml-1">μT</span></span>
                        <div className="text-[8px] opacity-30">MASS_DENSITY</div>
                     </div>
                     <ECGWave data={metalHistory} color="#ffaa00" />
