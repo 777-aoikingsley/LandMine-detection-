@@ -287,14 +287,24 @@ export default function App() {
       if (pendingIR.current !== null && pendingMetal.current !== null) {
         const ir = pendingIR.current;
         const metal = pendingMetal.current;
+        const size = 10; // Arduino array size
         
         // Final sensitivity check based on sums
-        if (ir < 7) { 
+        // A "Mine" is IR < size AND Metal < size (meaning at least one detection occurred)
+        const objectPresent = ir < size;
+        const metalPresent = metal < size;
+
+        if (objectPresent && metalPresent) {
            if (!isAlertOpen) {
               setIsAlertOpen(true);
               addMarker('MINE');
               addLog("!! HAZARD: METALLIC ORDNANCE DETECTED !!");
            }
+        } else if (objectPresent) {
+           // No metal detected in this scan
+           addLog("SCAN: NON-METALLIC OBJECT IDENTIFIED");
+        } else {
+           addLog("STATUS: SCANNING... AREA CLEAR");
         }
 
         // Clear for next cycle
@@ -302,14 +312,17 @@ export default function App() {
         pendingMetal.current = null;
       }
 
-      // Explicit triggers from Arduino strings
+      // Explicit triggers from Arduino strings (highest priority)
       if (lowerTrimmed.includes("⚠️") || lowerTrimmed.includes("mine")) {
-         if (!isAlertOpen) setIsAlertOpen(true);
-         addLog("!! ALARM: MINE DETECTED !!");
+         if (!isAlertOpen) {
+            setIsAlertOpen(true);
+            addMarker('MINE');
+         }
+         addLog("!! ALARM: ARDUINO SOURCE CONFIRMS MINE !!");
       } else if (lowerTrimmed.includes("no object")) {
          addLog("STATUS: SCANNING... CLEAR SCAN");
-      } else if (lowerTrimmed.includes("object detected")) {
-         addLog("SCAN: OBJECT DETECTED");
+      } else if (lowerTrimmed.includes("object detected but no metal")) {
+         addLog("SCAN: NON-METALLIC OBJECT FOUND");
       }
     });
   };
