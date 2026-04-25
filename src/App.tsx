@@ -148,7 +148,12 @@ export default function App() {
   
   const logRef = useRef<HTMLDivElement>(null);
 
+  const lastLogRef = useRef("");
   const addLog = (msg: string) => {
+    // Only log if the message is different from the last one (prevents spam like "No Object" repeating)
+    if (msg === lastLogRef.current && !msg.startsWith("!!")) return; 
+    
+    lastLogRef.current = msg;
     setLogs(prev => [...prev.slice(-40), { time: new Date().toLocaleTimeString(), msg }]);
   };
 
@@ -237,10 +242,6 @@ export default function App() {
   const serialBufferRef = useRef("");
 
   const handleIncomingData = (data: string) => {
-    // Debug log to confirm data reception (Truncated to first line)
-    const firstChunk = data.split('\n')[0].trim();
-    if (firstChunk) addLog(`INBOUND >> ${firstChunk.substring(0, 30)}`); 
-
     serialBufferRef.current += data;
     const lines = serialBufferRef.current.split(/\r?\n/);
     
@@ -262,28 +263,27 @@ export default function App() {
         setIrHistory(prev => [...prev.slice(1), ir]);
         setMetalHistory(prev => [...prev.slice(1), metal]);
 
-        // Feedback in log if it actually changed
-        if (ir !== 10 || metal !== 10) {
-          addLog(`DATA CHG: IR=${ir}, MET=${metal}`);
-        }
-
         // Check for hazard state (Low sum means active detections in this Arduino logic)
         if (ir < 5 && metal < 5) {
            if (!isAlertOpen) {
               setIsAlertOpen(true);
               addMarker('MINE');
-              addLog("!! HAZARD: METALLIC ORDNANCE CONFIRMED BY FUSION !!");
+              addLog("!! HAZARD: METALLIC ORDNANCE DETECTED !!");
            }
         }
       } else if (trimmed.includes("⚠️") || trimmed.includes("MINE")) {
-         addLog(`SIGNAL: ${trimmed}`);
-      } else if (trimmed.startsWith("Reading")) {
+         addLog("!! ALARM: MINE DETECTED !!");
+      } else if (trimmed.includes("No Object")) {
+         addLog("STATUS: SCANNING... CLEAR");
+      } else if (trimmed.includes("Object Detected but NO metal")) {
+         addLog("SCAN: NON-METALLIC OBJECT FOUND");
+      } else if (trimmed.includes("Reading")) {
          // Silently ignore internal Arduino loop logs
       } else if (trimmed.includes("--- NEW SCAN ---")) {
-         addLog("PULSE: REMOTE SCAN CYCLE INITIATED");
+         // Silently track scan pulses
       } else {
-         // Log any other unexpected serial strings for debugging
-         addLog(`STR: ${trimmed}`);
+         // Log unknown strings for debugging
+         addLog(`SIGNAL: ${trimmed.substring(0, 40)}`);
       }
     });
   };
