@@ -290,9 +290,9 @@ export default function App() {
         const size = 10; // Arduino array size
         
         // Final sensitivity check based on sums
-        // A "Mine" is IR < size AND Metal < size (meaning at least one detection occurred)
-        const objectPresent = ir < size;
-        const metalPresent = metal < size;
+        // Refined: require at least 80% detection for high certainty
+        const objectPresent = ir < 3; 
+        const metalPresent = metal < 4;
 
         if (objectPresent && metalPresent) {
            if (!isAlertOpen) {
@@ -341,7 +341,7 @@ export default function App() {
     }, ...prev].slice(0, 50));
   };
 
-  const isHazard = sensorData.ir < 5 && sensorData.metal < 5;
+  const isHazard = sensorData.ir < 3 && sensorData.metal < 4;
 
   return (
     <div className={`min-h-screen ${isHazard ? 'bg-[#0a0202]' : 'bg-[#010206]'} text-slate-200 font-mono relative overflow-hidden flex flex-col transition-colors duration-1000 uppercase`}>
