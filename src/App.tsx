@@ -262,36 +262,34 @@ export default function App() {
 
       const lowerTrimmed = trimmed.toLowerCase();
 
-      // Parse individual Sum lines (New format)
+      // Parse high-frequency live "Reading" ticks for immediate waveform motion
+      const liveMatch = trimmed.match(/Reading\s*\d+\s*->\s*IR:\s*(\d+)\s*\|\s*Metal:\s*(\d+)/i);
+      
+      // Parse individual Sum lines (Final scan results)
       const irMatch = trimmed.match(/IR Sum:\s*(\d+)/i);
       const metalMatch = trimmed.match(/Metal Sum:\s*(\d+)/i);
       
+      if (liveMatch) {
+        // High-frequency updates: convert 0/1 to 0 or 10 for the display scale
+        const ir = parseInt(liveMatch[1]) === 1 ? 10 : 0;
+        const metal = parseInt(liveMatch[2]) === 1 ? 10 : 0;
+        
+        setSensorData({ ir, metal });
+        const jitter = () => (Math.random() - 0.5) * 0.5;
+        setIrHistory(prev => [...prev.slice(1), ir + jitter()]);
+        setMetalHistory(prev => [...prev.slice(1), metal + jitter()]);
+      }
+
       if (irMatch) pendingIR.current = parseInt(irMatch[1]);
       if (metalMatch) pendingMetal.current = parseInt(metalMatch[1]);
 
-      // When both halves of a scan are collected, update the UI
+      // When final scan results are in, handle persistent logging and hazard logic
       if (pendingIR.current !== null && pendingMetal.current !== null) {
         const ir = pendingIR.current;
         const metal = pendingMetal.current;
         
-        setSensorData({ ir, metal });
-        // Add tiny jitter so the line always looks "alive"
-        const jitter = () => (Math.random() - 0.5) * 0.3;
-        setIrHistory(prev => [...prev.slice(1), ir + jitter()]);
-        setMetalHistory(prev => [...prev.slice(1), metal + jitter()]);
-
-        // Feedback in log if it actually changed
-        if (ir < 10 || metal < 10) {
-           setLastPulse(true);
-           setTimeout(() => setLastPulse(false), 50);
-        }
-
-        // Logic Check: User's coin reports IR 0 and Metal 10.
-        // We want to detect this as a metallic hazard.
-        // If IR is low (< 7), an object is present. 
+        // Final sensitivity check based on sums
         if (ir < 7) { 
-           // If an object is present, we treat it as potentially metallic
-           // unless metal reading is perfect 10 (though even 10 should be hazard if IR is 0)
            if (!isAlertOpen) {
               setIsAlertOpen(true);
               addMarker('MINE');
@@ -304,15 +302,14 @@ export default function App() {
         pendingMetal.current = null;
       }
 
-      // Actionable triggers from Arduino text
+      // Explicit triggers from Arduino strings
       if (lowerTrimmed.includes("⚠️") || lowerTrimmed.includes("mine")) {
+         if (!isAlertOpen) setIsAlertOpen(true);
          addLog("!! ALARM: MINE DETECTED !!");
       } else if (lowerTrimmed.includes("no object")) {
          addLog("STATUS: SCANNING... CLEAR SCAN");
-      } else if (lowerTrimmed.includes("object detected") && pendingIR.current === null) {
+      } else if (lowerTrimmed.includes("object detected")) {
          addLog("SCAN: OBJECT DETECTED");
-      } else if (lowerTrimmed.includes("reading")) {
-         // Silently ignore internal Arduino loop logs
       }
     });
   };
