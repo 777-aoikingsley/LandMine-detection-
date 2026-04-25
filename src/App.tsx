@@ -130,6 +130,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState<'DASHBOARD' | 'MAP'>('DASHBOARD');
   const [port, setPort] = useState<SerialPort | null>(null);
   const [sensorData, setSensorData] = useState<SensorData>({ ir: 10, metal: 10 });
+  const [lastPulse, setLastPulse] = useState(false);
   const [logs, setLogs] = useState<{time: string, msg: string}[]>([]);
   const [isAlertOpen, setIsAlertOpen] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
@@ -150,6 +151,10 @@ export default function App() {
 
   const lastLogRef = useRef("");
   const addLog = (msg: string) => {
+    // Pulse the heartbeat whenever data or log arrives
+    setLastPulse(true);
+    setTimeout(() => setLastPulse(false), 100);
+
     // Only log if the message is different from the last one (prevents spam like "No Object" repeating)
     if (msg === lastLogRef.current && !msg.startsWith("!!")) return; 
     
@@ -252,6 +257,8 @@ export default function App() {
       const trimmed = line.trim();
       if (!trimmed) return;
 
+      const lowerTrimmed = trimmed.toLowerCase();
+
       // Robust regex for [UI_DATA:ir,metal] with optional spaces
       const dataMatch = trimmed.match(/\[UI_DATA:\s*(\d+)\s*,\s*(\d+)\s*\]/);
       
@@ -263,6 +270,12 @@ export default function App() {
         setIrHistory(prev => [...prev.slice(1), ir]);
         setMetalHistory(prev => [...prev.slice(1), metal]);
 
+        // Feedback in log if it actually changed
+        if (ir < 10 || metal < 10) {
+           setLastPulse(true);
+           setTimeout(() => setLastPulse(false), 50);
+        }
+
         // Check for hazard state (Low sum means active detections in this Arduino logic)
         if (ir < 5 && metal < 5) {
            if (!isAlertOpen) {
@@ -271,16 +284,14 @@ export default function App() {
               addLog("!! HAZARD: METALLIC ORDNANCE DETECTED !!");
            }
         }
-      } else if (trimmed.includes("⚠️") || trimmed.includes("MINE")) {
+      } else if (lowerTrimmed.includes("⚠️") || lowerTrimmed.includes("mine")) {
          addLog("!! ALARM: MINE DETECTED !!");
-      } else if (trimmed.includes("No Object")) {
+      } else if (lowerTrimmed.includes("no object")) {
          addLog("STATUS: SCANNING... CLEAR");
-      } else if (trimmed.includes("Object Detected but NO metal")) {
+      } else if (lowerTrimmed.includes("object detected")) {
          addLog("SCAN: NON-METALLIC OBJECT FOUND");
-      } else if (trimmed.includes("Reading")) {
+      } else if (lowerTrimmed.includes("reading")) {
          // Silently ignore internal Arduino loop logs
-      } else if (trimmed.includes("--- NEW SCAN ---")) {
-         // Silently track scan pulses
       } else {
          // Log unknown strings for debugging
          addLog(`SIGNAL: ${trimmed.substring(0, 40)}`);
@@ -353,7 +364,10 @@ export default function App() {
               <div className="h-1 w-12 bg-white/10">
                 <motion.div animate={{ width: ['0%', '100%', '0%'] }} transition={{ duration: 2, repeat: Infinity }} className="h-full bg-cyan-400" />
               </div>
-              <p className="text-[10px] text-slate-500 font-bold tracking-[0.4em]">SYSTEM_STATUS: {isConnected ? 'UPLINK_STABLE' : 'NO_SIGNAL'}</p>
+              <p className="text-[10px] text-slate-500 font-bold tracking-[0.4em] flex items-center gap-2">
+                <span className={`w-1.5 h-1.5 rounded-full shadow-[0_0_8px_currentColor] transition-all duration-75 ${lastPulse ? 'text-amber-400 scale-125 opacity-100' : 'text-slate-800 scale-100 opacity-30'}`}>●</span>
+                SYSTEM_STATUS: {isConnected ? 'UPLINK_STABLE' : 'NO_SIGNAL'}
+              </p>
             </div>
           </div>
         </div>
@@ -703,7 +717,7 @@ function ECGWave({ data, color }: { data: number[], color: string }) {
              stroke={color}
              strokeWidth="1"
              points={data.map((v, i) => `${i},${20 - (v / 10 * 16 + 2)}`).join(' ')}
-             className="transition-all duration-300"
+             className="transition-none"
           />
        </svg>
        {/* Ambient Glitch Bits */}
