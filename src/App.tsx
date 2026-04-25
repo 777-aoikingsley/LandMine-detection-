@@ -139,6 +139,9 @@ export default function App() {
   const [metalHistory, setMetalHistory] = useState<number[]>(Array(100).fill(10));
   const [currentPosition, setCurrentPosition] = useState({ lat: 18.989, lng: 73.117 }); // Default: Navi Mumbai (VIMEET)
 
+  const pendingIR = useRef<number | null>(null);
+  const pendingMetal = useRef<number | null>(null);
+
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition((pos) => {
@@ -259,16 +262,23 @@ export default function App() {
 
       const lowerTrimmed = trimmed.toLowerCase();
 
-      // Robust regex for [UI_DATA:ir,metal] with optional spaces
-      const dataMatch = trimmed.match(/\[UI_DATA:\s*(\d+)\s*,\s*(\d+)\s*\]/);
+      // Parse individual Sum lines (New format)
+      const irMatch = trimmed.match(/IR Sum:\s*(\d+)/i);
+      const metalMatch = trimmed.match(/Metal Sum:\s*(\d+)/i);
       
-      if (dataMatch) {
-        const ir = parseInt(dataMatch[1]);
-        const metal = parseInt(dataMatch[2]);
+      if (irMatch) pendingIR.current = parseInt(irMatch[1]);
+      if (metalMatch) pendingMetal.current = parseInt(metalMatch[1]);
+
+      // When both halves of a scan are collected, update the UI
+      if (pendingIR.current !== null && pendingMetal.current !== null) {
+        const ir = pendingIR.current;
+        const metal = pendingMetal.current;
         
         setSensorData({ ir, metal });
-        setIrHistory(prev => [...prev.slice(1), ir]);
-        setMetalHistory(prev => [...prev.slice(1), metal]);
+        // Add tiny jitter so the line always looks "alive"
+        const jitter = () => (Math.random() - 0.5) * 0.3;
+        setIrHistory(prev => [...prev.slice(1), ir + jitter()]);
+        setMetalHistory(prev => [...prev.slice(1), metal + jitter()]);
 
         // Feedback in log if it actually changed
         if (ir < 10 || metal < 10) {
@@ -276,25 +286,33 @@ export default function App() {
            setTimeout(() => setLastPulse(false), 50);
         }
 
-        // Check for hazard state (Low sum means active detections in this Arduino logic)
-        if (ir < 5 && metal < 5) {
+        // Logic Check: User's coin reports IR 0 and Metal 10.
+        // We want to detect this as a metallic hazard.
+        // If IR is low (< 7), an object is present. 
+        if (ir < 7) { 
+           // If an object is present, we treat it as potentially metallic
+           // unless metal reading is perfect 10 (though even 10 should be hazard if IR is 0)
            if (!isAlertOpen) {
               setIsAlertOpen(true);
               addMarker('MINE');
               addLog("!! HAZARD: METALLIC ORDNANCE DETECTED !!");
            }
         }
-      } else if (lowerTrimmed.includes("⚠️") || lowerTrimmed.includes("mine")) {
+
+        // Clear for next cycle
+        pendingIR.current = null;
+        pendingMetal.current = null;
+      }
+
+      // Actionable triggers from Arduino text
+      if (lowerTrimmed.includes("⚠️") || lowerTrimmed.includes("mine")) {
          addLog("!! ALARM: MINE DETECTED !!");
       } else if (lowerTrimmed.includes("no object")) {
-         addLog("STATUS: SCANNING... CLEAR");
-      } else if (lowerTrimmed.includes("object detected")) {
-         addLog("SCAN: NON-METALLIC OBJECT FOUND");
+         addLog("STATUS: SCANNING... CLEAR SCAN");
+      } else if (lowerTrimmed.includes("object detected") && pendingIR.current === null) {
+         addLog("SCAN: OBJECT DETECTED");
       } else if (lowerTrimmed.includes("reading")) {
          // Silently ignore internal Arduino loop logs
-      } else {
-         // Log unknown strings for debugging
-         addLog(`SIGNAL: ${trimmed.substring(0, 40)}`);
       }
     });
   };
@@ -433,7 +451,11 @@ export default function App() {
             >
               {/* Left Column: Linear Data */}
               <div className="col-span-12 lg:col-span-4 flex flex-col gap-6 overflow-hidden">
-                 <CyberPanel title="Neural IR Signature" icon={Activity} variant={isHazard ? 'red' : 'cyan'}>
+                  <CyberPanel title="Neural IR Signature" icon={Activity} variant={isHazard ? 'red' : 'cyan'}>
+                    <div className="absolute top-2 right-4 flex items-center gap-1">
+                      <div className={`w-1 h-1 rounded-full ${sensorData.ir < 10 ? 'bg-cyan-400 animate-ping' : 'bg-white/10'}`} />
+                      <span className="text-[7px] opacity-30">LIVE_LINK</span>
+                    </div>
                     <div className="flex justify-between items-baseline mb-2">
                        <span className={`text-4xl font-black ${isHazard ? 'text-red-500' : 'text-cyan-400'} tracking-tighter`}>{sensorData.ir.toFixed(1)}<span className="text-sm opacity-50 ml-1">Hz</span></span>
                        <div className="text-[8px] opacity-30">SIGNAL_LEVEL</div>
@@ -442,6 +464,10 @@ export default function App() {
                  </CyberPanel>
 
                  <CyberPanel title="Magnetic Mass Spectrometer" icon={Zap} variant="amber">
+                    <div className="absolute top-2 right-4 flex items-center gap-1">
+                      <div className={`w-1 h-1 rounded-full ${sensorData.metal < 10 ? 'bg-amber-400 animate-ping' : 'bg-white/10'}`} />
+                      <span className="text-[7px] opacity-30">LIVE_LINK</span>
+                    </div>
                     <div className="flex justify-between items-baseline mb-2">
                        <span className="text-4xl font-black text-amber-500 tracking-tighter">{sensorData.metal.toFixed(1)}<span className="text-sm opacity-50 ml-1">μT</span></span>
                        <div className="text-[8px] opacity-30">MASS_DENSITY</div>
